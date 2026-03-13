@@ -1,0 +1,7 @@
+The computer will generate a random number between 1 and 100
+
+The user enters a guess
+
+The computer indicates if the guess was too high or too low
+
+When the user guesses the correct number, a congrats msg is printed!
