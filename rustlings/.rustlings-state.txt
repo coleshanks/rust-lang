@@ -1,6 +1,6 @@
 DON'T EDIT THIS FILE!
 
-variables2
+strings2
 
 intro1
 intro2
