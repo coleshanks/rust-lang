@@ -34,6 +34,12 @@
 
 ## Functions
 - Named in `snake_case`, parameters always need type annotations
+- Parameter name and type are separate — name is just the local label, type is what it accepts:
+  ```rust
+  fn area(rectangle: &Rectangle) -> u32
+  //      ^^^^^^^^^  ^^^^^^^^^^
+  //      name       type
+  ```
 - **Statements** don't return a value; **expressions** do
 - A block `{}` is an expression — its value is the last expression (no semicolon)
 - Adding `;` to a tail expression turns it into a statement returning `()`
