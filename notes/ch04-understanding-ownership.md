@@ -117,3 +117,95 @@ fn calculate_length(s: String) -> (String, usize) {
 ```
 
 References (4.2) solve this properly.
+
+## References and Borrowing
+
+`&` creates a reference — you can use a value without taking ownership. This is called **borrowing**. When the reference goes out of scope, the value isn't dropped (you don't own it).
+
+```rust
+fn calculate_length(s: &String) -> usize {
+    s.len()
+} // s goes out of scope, but nothing is dropped — we don't own it
+```
+
+### Immutable references
+
+- Default. You can have as many `&T` references as you want simultaneously.
+- Read-only — you can't modify the data through them.
+
+### Mutable references (`&mut`)
+
+- Lets you modify borrowed data.
+- **Only one `&mut` reference can exist at a time**, and no other references (`&` or `&mut`) can overlap with it while it's in use.
+- The restriction prevents data races at compile time.
+
+```rust
+let mut s = String::from("hello");
+let r1 = &s;
+let r2 = &s;
+println!("{r1} and {r2}"); // r1, r2 last used here
+
+let r3 = &mut s; // fine — r1 and r2 are done
+println!("{r3}");
+```
+
+Rust tracks the **last point of use**, not scope end — this is called Non-Lexical Lifetimes (NLL). So "per scope" isn't quite right; what matters is whether references overlap in actual usage.
+
+### Dangling references
+
+Rust prevents these at compile time. You can't return a reference to a local variable — the data would be dropped before the reference is used. Return the owned value instead.
+
+### Rules summary
+
+1. Any number of immutable references (`&T`) OR exactly one mutable reference (`&mut T`) — never both at once
+2. References must always point to valid data
+
+## Slices
+
+A slice is a reference to a contiguous sequence of elements in a collection — no ownership.
+
+```rust
+let s = String::from("hello world");
+let hello = &s[0..5];  // "hello"
+let world = &s[6..11]; // "world"
+```
+
+Range syntax `[start..end]` is **exclusive on the right** — `[0..5]` gives indices 0–4.
+
+Shortcuts:
+- `[..5]` — from start to index 5 (exclusive)
+- `[3..]` — from index 3 to end
+- `[..]` — whole collection (useful for converting `&String` to `&str`)
+
+### `&str`
+
+The type of a string slice. String literals are also `&str` — a pointer into read-only memory in the binary, which is why they're always immutable.
+
+### Why slices over indices
+
+Returning a bare `usize` index from a function is fragile — if the string is modified, the index is meaningless and Rust can't help. Returning `&str` ties the reference to the data, so the borrow checker enforces validity:
+
+```rust
+fn first_word(s: &str) -> &str { ... }
+```
+
+If you try to mutate `s` while the returned slice is still in use, it's a compile error — same borrow rules as references.
+
+### When to pass what
+
+- Pass by value (`String`) — when the function should own and consume it
+- Pass `&` — when you want to use it without losing ownership
+- Pass `&mut` — when you want to modify it without losing ownership
+
+### Prefer `&str` over `&String` in function parameters
+
+Taking `&str` is more flexible — works with both `String` (via `&s` or `&s[..]`) and string literals. No reason to restrict to `&String`.
+
+### Array slices
+
+Same idea works on arrays:
+
+```rust
+let a = [1, 2, 3, 4, 5];
+let slice = &a[1..3]; // &[i32], == [2, 3]
+```
