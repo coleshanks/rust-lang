@@ -49,5 +49,5 @@ fn main() {
 
     let nth_number = fibonacci[n - 1];
 
-    println!("\nThe nth fibonacci number is: {nth_number}!");
+    println!("\nThe nth fibonacci number is:\n{nth_number}!");
 }
