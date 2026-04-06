@@ -61,6 +61,19 @@ let m = Message::Write(String::from("hello"));
 m.call();
 ```
 
+## Variants with data
+
+Variants can be plain tags (no data) or carry data of any type:
+
+```rust
+enum Coin {
+    Dime,               // just a label, no payload
+    Quarter(UsState),   // label + a UsState value inside
+}
+```
+
+The type in the parens is what goes in that slot. When you create one: `Coin::Quarter(UsState::Alaska)`. When you match on it, the pattern extracts it: `Coin::Quarter(state)` binds `state` to the inner value.
+
 ## `Option<T>` — Rust's answer to null
 
 Rust has no null. Instead, the standard library provides `Option<T>`:
@@ -82,6 +95,10 @@ let absent: Option<i32> = None;
 `Option<T>` and `T` are different types — you can't use one where the other is expected. This forces explicit handling of the "maybe nothing" case at compile time. No null pointer surprises.
 
 The big idea: normal Rust types can never be null, so you avoid a whole class of bugs. If something might be nothing, you use `Option<T>` and must explicitly handle both cases — usually with `match`. C/C++ lets you ignore null checks; Rust makes them mandatory at compile time.
+
+`Option<T>` vs `T`: if a function returns `String` it always has one, guaranteed. If it returns `Option<String>` it might not — and you can't use it without handling both cases. Nullability is opt-in and impossible to ignore.
+
+`None` is not `()`. `None` means "no value." `()` is the unit type (like void) — it's a value, just an empty one. Similar concept, different things.
 
 Real use case — a function that might not find what it's looking for:
 
@@ -155,7 +172,9 @@ _ => reroll()   // don't care about the value
 _ => ()         // do nothing
 ```
 
-Catch-all must come last.
+Any name works as a catch-all (`other`, `val`, `x`, etc.) — it's just a variable. `_` is the special case that matches without binding (use when you don't need the value). Catch-all must come last.
+
+`format!` is like `println!` but returns a `String` instead of printing it.
 
 ## `if let`
 
