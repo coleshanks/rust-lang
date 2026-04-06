@@ -90,6 +90,8 @@ mod front_of_house;
 
 Prefer the `foo.rs` style over `foo/mod.rs` — the latter gives you a bunch of files all named `mod.rs` which is confusing in an editor.
 
+A module file (`foo.rs`) is the branch. Everything defined directly in it — structs, fns, enums, etc. — hangs off that node. The associated `foo/` directory only appears if `foo` has submodules that need their own files. No submodules = just a file, no directory needed.
+
 When a module lives in a directory with submodules, the directory needs a `foo.rs` at the same level (or `foo/mod.rs`) that declares the submodules:
 
 ```
