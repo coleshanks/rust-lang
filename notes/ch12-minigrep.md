@@ -219,3 +219,28 @@ minigrep/
 ```
 
 `main.rs` stays thin and untestable-by-design. All logic moves to `lib.rs` where it can be unit tested.
+
+---
+
+## main.rs vs lib.rs — Responsibility Split
+
+| | `main.rs` | `lib.rs` |
+|---|---|---|
+| **Purpose** | Binary entry point | Library — all real logic |
+| **Contains** | arg parsing, `Config::build` call, `run` call, top-level error handling | `Config`, `run`, `search`, tests |
+| **Testable?** | No — `main` can't be unit tested | Yes — everything here can be tested |
+| **Reusable?** | No | Yes — other crates can `use minigrep::...` |
+| **Should be** | So thin you can verify it by reading | Where all the interesting code lives |
+
+### When lib.rs gets big — split into submodules
+
+```
+src/
+├── main.rs
+├── lib.rs       ← declares modules, re-exports public API
+├── config.rs    ← Config struct and build logic
+├── search.rs    ← search / search_case_insensitive
+└── output.rs    ← formatting, printing
+```
+
+Each submodule is declared in `lib.rs` with `mod config;` etc. The rule: if it needs a test, it belongs in `lib.rs` or a submodule of it — not in `main.rs`.
