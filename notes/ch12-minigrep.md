@@ -173,6 +173,8 @@ let ignore_case = env::var("IGNORE_CASE").is_ok();
 
 - `env::var()` returns `Result` — `.is_ok()` is true if the variable is set, regardless of its value
 - Usage: `IGNORE_CASE=1 cargo run -- query file.txt`
+- The variable name (`IGNORE_CASE`) is not special — it's just what your code looks for. OS-level vars like `PATH` and `HOME` are set automatically; yours are custom conventions for your program.
+- Setting inline (`IGNORE_CASE=1 cargo run ...`) only applies to that one command. `export IGNORE_CASE=1` persists for the session.
 
 Case-insensitive search implementation:
 
@@ -189,7 +191,10 @@ pub fn search_case_insensitive<'a>(query: &str, contents: &'a str) -> Vec<&'a st
 }
 ```
 
-Note: `query` is shadowed here — `to_lowercase()` returns a `String`, not a `&str`.
+- `query` is shadowed here — `to_lowercase()` returns a `String`, not a `&str`
+- Method chaining goes left to right: `line.to_lowercase()` runs first, returns a `String`, then `.contains(&query)` is called on that
+- `&query` in `.contains(&query)` coerces the `String` back to `&str` for the comparison
+- The original `line` (not the lowercased version) is pushed to results — you compare lowercase but return the real line
 
 ---
 
@@ -244,3 +249,187 @@ src/
 ```
 
 Each submodule is declared in `lib.rs` with `mod config;` etc. The rule: if it needs a test, it belongs in `lib.rs` or a submodule of it — not in `main.rs`.
+
+---
+
+## Full Code Walkthrough
+
+A line-by-line breakdown of the finished project.
+
+---
+
+### `main.rs`
+
+```rust
+use std::env;
+use std::fs;
+use std::process;
+use std::error::Error;
+use minigrep::search;
+use minigrep::search_case_insensitive;
+```
+
+Imports. `env` for CLI args and env vars, `fs` for reading files, `process` for `exit()`, `Error` for the trait object in `run`'s return type. The two `minigrep::` imports pull in the public functions from `lib.rs` — the crate name matches the package name in `Cargo.toml`.
+
+---
+
+```rust
+fn main() {
+    let args: Vec<String> = env::args().collect();
+```
+
+`env::args()` returns an iterator over the command-line arguments as `String`s. `.collect()` needs a type annotation (`Vec<String>`) because it can't infer what kind of collection you want. `args[0]` is always the binary name — actual user args start at `args[1]`.
+
+---
+
+```rust
+    let config = Config::build(&args).unwrap_or_else(|err| {
+        eprintln!("Problem parsing arguments: {err}");
+        process::exit(1);
+    });
+```
+
+`Config::build` returns a `Result`. If it's `Ok`, `unwrap_or_else` unwraps the value and assigns it to `config`. If it's `Err`, the closure runs — prints the error to stderr (`eprintln!`), then exits the process with code `1`. The closure takes the error value as `err`, which is the `&'static str` returned from `build`.
+
+`eprintln!` instead of `println!` means error messages go to stderr, so they still show up even when stdout is redirected to a file.
+
+---
+
+```rust
+    println!("Searching for {}", config.query);
+    println!("In file {}", config.file_path);
+
+    if let Err(e) = run(config) {
+        eprintln!("Application error: {e}");
+        process::exit(1)
+    }
+}
+```
+
+`run` returns `Result<(), Box<dyn Error>>`. `if let Err(e)` only matches the error case — there's nothing to do on success (it returns `()`), so `if let` is cleaner than `unwrap_or_else` here. Same pattern: print to stderr and exit on failure.
+
+---
+
+```rust
+pub struct Config {
+    pub query: String,
+    pub file_path: String,
+    pub ignore_case: bool,
+}
+```
+
+Groups the three config values into one struct instead of passing them as separate variables. All fields are `pub` so `lib.rs` can access them. `query` and `file_path` are owned `String`s — `build` clones them out of `args`. `ignore_case` is a plain `bool` read from the environment.
+
+---
+
+```rust
+fn run(config: Config) -> Result<(), Box<dyn Error>> {
+    let contents = fs::read_to_string(config.file_path)?;
+```
+
+Takes ownership of `config`. `fs::read_to_string` opens the file and returns its full contents as a `String`, or an error. The `?` operator propagates any error up to the caller (main) instead of panicking. `Box<dyn Error>` as the error type means "any type that implements the `Error` trait" — flexible enough to hold whatever `read_to_string` might return.
+
+---
+
+```rust
+    let results = if config.ignore_case {
+        search_case_insensitive(&config.query, &contents)
+    } else {
+        search(&config.query, &contents)
+    };
+
+    for line in results {
+        println!("{line}");
+    }
+
+    Ok(())
+}
+```
+
+The `if/else` is an expression — it evaluates to whichever function's return value matches the condition, and that gets bound to `results`. Both branches return `Vec<&str>`, so the types line up. Then just iterate and print. `Ok(())` returns unit wrapped in `Ok` to satisfy the `Result<(), _>` return type — nothing meaningful to return on success.
+
+---
+
+```rust
+impl Config {
+    fn build(args: &[String]) -> Result<Config, &'static str> {
+        if args.len() < 3 {
+            return Err("not enough arguments");
+        }
+
+        let query = args[1].clone();
+        let file_path = args[2].clone();
+
+        let ignore_case = env::var("IGNORE_CASE").is_ok();
+
+        Ok(Config { query, file_path, ignore_case })
+    }
+}
+```
+
+Takes a slice of `String`s (not a `Vec` — slices are more flexible). Returns `Result` so it can report failure without panicking. The error type is `&'static str` — a string literal baked into the binary, valid for the entire program lifetime.
+
+`args[1]` and `args[2]` are cloned into owned `String`s because `Config` needs to own its data independently of `args`.
+
+`env::var("IGNORE_CASE")` returns `Ok` if the variable is set (to anything), `Err` if it isn't. `.is_ok()` converts that to a plain `bool`. The variable name is not special — it's just what this program looks for.
+
+---
+
+### `lib.rs`
+
+```rust
+pub fn search<'a>(query: &str, contents: &'a str) -> Vec<&'a str> {
+    let mut results = Vec::new();
+
+    for line in contents.lines() {
+        if line.contains(query) {
+            results.push(line);
+        }
+    }
+    results
+}
+```
+
+The lifetime `'a` connects `contents` to the return type. It tells the compiler: the `&str` slices in the returned `Vec` are borrowed from `contents`, not from `query`. Without this, the compiler can't verify the returned references are valid after the function returns.
+
+`contents.lines()` gives an iterator over the lines of the string (splitting on newlines). `line.contains(query)` checks for a substring match. The matching lines are pushed as slices — they point directly into `contents`, no allocation.
+
+---
+
+```rust
+pub fn search_case_insensitive<'a>(query: &str, contents: &'a str) -> Vec<&'a str> {
+    let query = query.to_lowercase();
+    let mut results = Vec::new();
+
+    for line in contents.lines() {
+        if line.to_lowercase().contains(&query) {
+            results.push(line);
+        }
+    }
+    results
+}
+```
+
+Same structure as `search`, with two differences:
+
+1. `let query = query.to_lowercase()` — shadows the parameter with a new `String`. Type changes from `&str` to `String`. Both sides of the comparison need to be the same case, so you lowercase both.
+2. `line.to_lowercase().contains(&query)` — chains left to right: `to_lowercase()` on `line` returns a temporary `String`, then `.contains(&query)` runs on that. `&query` coerces the `String` back to `&str` for the comparison.
+
+The original `line` (not the lowercased version) is what gets pushed — you want to return the real text, just matched case-insensitively.
+
+---
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn case_sensitive() { ... }
+
+    #[test]
+    fn case_insensitive() { ... }
+}
+```
+
+`#[cfg(test)]` means this module only compiles when running `cargo test` — it doesn't ship in the binary. `use super::*` imports everything from the parent module (`lib.rs`) into the test scope. Two tests: one verifies `search` doesn't match across cases (`"duct"` matches `"productive"` but not `"Duct"`), the other verifies `search_case_insensitive` matches regardless of case (`"rUsT"` matches both `"Rust:"` and `"Trust me."`).
