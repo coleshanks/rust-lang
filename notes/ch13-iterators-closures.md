@@ -75,7 +75,12 @@ Closures automatically implement one or more of three traits depending on what t
 - Can be called **multiple times**, even concurrently
 - Doesn't move or mutate captured values — only borrows immutably
 
-The hierarchy: `Fn` is the most restrictive (safest), `FnOnce` the least. A function that requires `FnMut` accepts anything that is `FnMut` or `Fn`. A function that requires `FnOnce` accepts any closure.
+The trait a closure gets depends on what it does with captured values:
+- Moves a captured value out of its body → `FnOnce` only (can't run again, value is gone)
+- Mutates captured values but keeps them → `FnMut` (and `FnOnce`)
+- Only reads captured values (or captures nothing) → `Fn` (and `FnMut` and `FnOnce`)
+
+Every closure implements at least `FnOnce`. The hierarchy: `Fn` is the most restrictive (safest), `FnOnce` the least. A function that requires `FnMut` accepts anything that is `FnMut` or `Fn`. A function that requires `FnOnce` accepts any closure.
 
 **Common example — `unwrap_or_else` takes `FnOnce`:**
 ```rust
