@@ -6,9 +6,13 @@ Tests verify that code does what you intend. Rust's type system catches a lot, b
 
 ## Writing Tests
 
-A test is any function annotated with `#[test]`. `cargo test` builds a test runner binary and runs them all.
+A test is any function annotated with `#[test]`. `cargo test` builds a test runner binary and runs them all. A test fails if it panics.
 
 ```rust
+pub fn add(left: u64, right: u64) -> u64 {
+    left + right
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -23,19 +27,30 @@ mod tests {
 
 ### Assertion Macros
 
-- `assert!(expr)` — passes if `expr` is true
-- `assert_eq!(a, b)` — passes if `a == b`, shows both values on failure
+- `assert!(expr)` — passes if `expr` is `true`
+- `assert_eq!(a, b)` — passes if `a == b`, prints both values on failure
 - `assert_ne!(a, b)` — passes if `a != b`
 
-Values passed to `assert_eq!` / `assert_ne!` must implement `PartialEq` and `Debug`.
+Values passed to `assert_eq!` / `assert_ne!` must implement `PartialEq` and `Debug` (usually via `#[derive(PartialEq, Debug)]`).
 
-Custom failure messages (extra args are passed to `format!`):
-```rust
-assert!(result.contains("Carol"), "Got: `{result}`");
+What `assert_eq!` failure looks like:
+```
+assertion `left == right` failed
+  left: 5
+ right: 4
 ```
 
-### Panics and `should_panic`
+Custom failure messages — extra args are passed to `format!`:
+```rust
+assert!(
+    result.contains("Carol"),
+    "Greeting did not contain name, value was `{result}`"
+);
+```
 
+### `#[should_panic]`
+
+Tests that expect a panic:
 ```rust
 #[test]
 #[should_panic]
@@ -44,22 +59,24 @@ fn rejects_out_of_range() {
 }
 ```
 
-Add `expected` to pin down which panic message is acceptable:
+Add `expected` to require a specific substring in the panic message:
 ```rust
 #[test]
-#[should_panic(expected = "less than or equal to 100")]
+#[should_panic(expected = "between 1 and 100")]
 fn rejects_out_of_range() {
     Guess::new(200);
 }
+// passes if the panic message *contains* "between 1 and 100"
 ```
 
 ### Returning `Result<T, E>`
 
-Tests can return `Result` instead of panicking — lets you use `?` inside tests:
+Tests can return `Result` instead of panicking — lets you use `?` inside test bodies:
 ```rust
 #[test]
 fn it_works() -> Result<(), String> {
-    if add(2, 2) == 4 {
+    let result = add(2, 2);
+    if result == 4 {
         Ok(())
     } else {
         Err(String::from("two plus two does not equal four"))
@@ -67,36 +84,39 @@ fn it_works() -> Result<(), String> {
 }
 ```
 
-Cannot combine `#[should_panic]` with `Result` tests. Use `assert!(value.is_err())` instead.
+Cannot combine `#[should_panic]` with `Result` tests. To assert an operation fails, use `assert!(value.is_err())`.
 
 ---
 
 ## Running Tests
 
 ```bash
-cargo test                        # run all tests
-cargo test -- --test-threads=1   # run sequentially (no parallelism)
-cargo test -- --show-output      # show stdout from passing tests
-cargo test add                   # run tests whose name contains "add"
+cargo test                          # run all tests
+cargo test -- --test-threads=1      # run sequentially (no parallelism)
+cargo test -- --show-output         # show stdout from passing tests too
+cargo test add                      # run tests whose name contains "add" (substring filter)
+cargo test -- --ignored             # run only #[ignore]-marked tests
+cargo test -- --include-ignored     # run everything including ignored
 cargo test --test integration_test  # run a specific integration test file
 ```
 
-Tests run in parallel by default. If tests share state (files, env vars, etc.), use `--test-threads=1`.
+Tests run in parallel by default — each in its own thread. If tests share state (files, env vars, etc.), use `--test-threads=1` to avoid interference.
 
-Output from passing tests is captured by default — only failures show their stdout.
+`println!` output from passing tests is captured and hidden by default. Only failing tests show their stdout unless you pass `--show-output`.
+
+`cargo test add` runs anything with "add" anywhere in the test path — including the module name. So `tests::add_two_and_two` and `tests::add_three_and_two` both match.
 
 ### Ignoring Tests
 
 ```rust
 #[test]
 #[ignore]
-fn slow_test() { ... }
+fn slow_test() {
+    // takes a long time — skip during normal runs
+}
 ```
 
-```bash
-cargo test -- --ignored          # run only ignored tests
-cargo test -- --include-ignored  # run everything
-```
+Ignored tests appear in output as `ignored`, not `ok` or `FAILED`.
 
 ---
 
@@ -104,34 +124,41 @@ cargo test -- --include-ignored  # run everything
 
 ### Unit Tests
 
-Live in `src/` alongside the code they test, inside a `#[cfg(test)]` module. The `#[cfg(test)]` annotation means this code is only compiled when running `cargo test`, not `cargo build`.
+Live in `src/` alongside the code they test, inside a `#[cfg(test)]` module. The annotation means this code is only compiled during `cargo test`, not `cargo build` — no cost in production binaries.
 
 ```rust
+fn internal_adder(a: u64, b: u64) -> u64 {
+    a + b
+}
+
 #[cfg(test)]
 mod tests {
-    use super::*;  // gives access to parent module, including private items
+    use super::*;  // pulls in parent scope — including private items
 
     #[test]
-    fn test_private_fn() { ... }
+    fn test_private_fn() {
+        assert_eq!(internal_adder(2, 2), 4);
+    }
 }
 ```
 
-Unit tests can test private functions — `use super::*` pulls in everything from the parent scope, including non-`pub` items.
+Unit tests can test private functions — `use super::*` brings in everything from the parent module, regardless of visibility. Child modules can always access ancestor items.
 
 ### Integration Tests
 
-Live in a top-level `tests/` directory. Each file is compiled as its own crate. No `#[cfg(test)]` needed — Cargo handles that automatically.
+Live in a top-level `tests/` directory. Each file is compiled as its own separate crate. No `#[cfg(test)]` needed — Cargo handles that automatically.
 
 ```
 adder/
-├── src/lib.rs
+├── src/
+│   └── lib.rs
 └── tests/
     └── integration_test.rs
 ```
 
 ```rust
 // tests/integration_test.rs
-use adder::add_two;
+use adder::add_two;  // must explicitly import — it's an external crate from here
 
 #[test]
 fn it_adds_two() {
@@ -139,21 +166,41 @@ fn it_adds_two() {
 }
 ```
 
-Integration tests can only use the public API.
+Integration tests can only use the public API — no access to private internals.
+
+`cargo test` output has three sections:
+```
+Running unittests src/lib.rs
+... (unit test results)
+
+Running tests/integration_test.rs
+... (integration test results)
+
+Doc-tests adder
+... (doc test results)
+```
 
 ### Shared Helpers Across Integration Tests
 
-Use `tests/common/mod.rs` (not `tests/common.rs`) so Cargo doesn't treat it as a test file:
+Use `tests/common/mod.rs` — not `tests/common.rs`. A `.rs` file directly in `tests/` is treated as an integration test file. The `common/mod.rs` form is not:
 
 ```
 tests/
 ├── common/
-│   └── mod.rs      ← shared setup code
+│   └── mod.rs        ← shared setup, won't appear as a test file
 └── integration_test.rs
 ```
 
 ```rust
-// integration_test.rs
+// tests/common/mod.rs
+pub fn setup() {
+    // shared setup logic
+}
+```
+
+```rust
+// tests/integration_test.rs
+use adder::add_two;
 mod common;
 
 #[test]
@@ -163,6 +210,26 @@ fn it_adds_two() {
 }
 ```
 
+### Doc Tests
+
+Code examples in doc comments are run as tests by `cargo test`. They appear in the `Doc-tests` section of output:
+
+```rust
+/// Adds two to the given number.
+///
+/// # Examples
+///
+/// ```
+/// let result = adder::add_two(5);
+/// assert_eq!(result, 7);
+/// ```
+pub fn add_two(a: u64) -> u64 {
+    a + 2
+}
+```
+
+Doc tests ensure examples in documentation actually compile and run correctly. Covered more in ch14.
+
 ### Binary Crates
 
-Integration tests only work on library crates. If your project is a binary (`src/main.rs` only), there's nothing to `use`. Convention: put logic in `src/lib.rs`, keep `main.rs` thin — then integration tests can target the lib.
+Integration tests only work on library crates — there's nothing to `use` from a binary. Convention: put logic in `src/lib.rs`, keep `src/main.rs` thin. Integration tests then target the lib, and `main.rs` just wires things together.

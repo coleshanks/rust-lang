@@ -1,9 +1,9 @@
 # Ch 9 — Error Handling
 
-Rust has no exceptions. Two categories of errors, handled differently:
+Rust has no exceptions. Two categories of errors:
 
 - **Unrecoverable** — bug, something that should never happen → `panic!`
-- **Recoverable** — expected failure, caller should decide what to do → `Result<T, E>`
+- **Recoverable** — expected failure, caller should decide → `Result<T, E>`
 
 ---
 
@@ -12,27 +12,31 @@ Rust has no exceptions. Two categories of errors, handled differently:
 Prints an error message, unwinds the stack, and quits. Two ways to trigger:
 
 ```rust
-panic!("crash and burn");   // explicit
-v[99];                      // implicit — index out of bounds
+panic!("crash and burn");  // explicit
+let v = vec![1, 2, 3];
+v[99];                     // implicit — index out of bounds, panics at runtime
 ```
 
 Code compiles fine — panic happens at runtime.
 
 **Backtraces:**
 ```bash
-RUST_BACKTRACE=1 ./main
+RUST_BACKTRACE=1 cargo run
+RUST_BACKTRACE=full cargo run  # more verbose
 ```
 
-Shows the call stack at the point of the panic. Read it bottom to top — bottom is where execution started, top is where it crashed. Find the first line that's your code (not `std::` or `core::`) — that's where the bug is.
+Shows the call stack at the point of the panic. Read from the **top** — start at the top and read down until you see a file you wrote. That's where the problem originated. Lines above it are std/library internals, lines below are what called your code.
 
 **Unwinding vs abort:**
 
-By default Rust unwinds the stack on panic (walks back up, cleans up each frame). For smaller binaries you can abort immediately instead:
+Default: Rust unwinds the stack on panic (walks back up, runs `drop` for each frame). For smaller binaries, abort immediately instead:
 
 ```toml
 [profile.release]
 panic = 'abort'
 ```
+
+Abort skips cleanup — the OS reclaims memory. Smaller binary, but no destructors run.
 
 ---
 
@@ -45,10 +49,12 @@ enum Result<T, E> {
 }
 ```
 
-`T` is the success type, `E` is the error type. Both generic — filled in by context.
+`T` is the success type, `E` is the error type. Both generic — filled in from context.
 
 **Basic handling:**
 ```rust
+use std::fs::File;
+
 let greeting_file = match File::open("hello.txt") {
     Ok(file) => file,
     Err(error) => panic!("Problem opening the file: {error:?}"),
@@ -57,92 +63,159 @@ let greeting_file = match File::open("hello.txt") {
 
 **Matching on specific error kinds:**
 ```rust
-match File::open("hello.txt") {
+use std::fs::File;
+use std::io::ErrorKind;
+
+let greeting_file = match File::open("hello.txt") {
     Ok(file) => file,
     Err(error) => match error.kind() {
-        ErrorKind::NotFound => // create it
+        ErrorKind::NotFound => match File::create("hello.txt") {
+            Ok(fc) => fc,
+            Err(e) => panic!("Problem creating the file: {e:?}"),
+        },
         _ => panic!("Problem opening the file: {error:?}"),
     },
-}
+};
 ```
 
-**`unwrap()`** — returns the value or panics:
+**`unwrap()`** — returns the `Ok` value or panics with a generic message:
 ```rust
 let f = File::open("hello.txt").unwrap();
 ```
 
-**`expect()`** — same but with a custom panic message (prefer this over `unwrap` in real code):
+**`expect()`** — same but with a custom panic message. Prefer this — the message tells you *why* you expected success:
 ```rust
-let f = File::open("hello.txt").expect("hello.txt should exist");
+let f = File::open("hello.txt").expect("hello.txt should be present in the project");
+```
+
+**`unwrap_or_else()`** — panics or runs a closure on error (cleaner than nested `match` for complex error logic):
+```rust
+let greeting_file = File::open("hello.txt").unwrap_or_else(|error| {
+    if error.kind() == ErrorKind::NotFound {
+        File::create("hello.txt").unwrap_or_else(|error| {
+            panic!("Problem creating the file: {error:?}");
+        })
+    } else {
+        panic!("Problem opening the file: {error:?}");
+    }
+});
 ```
 
 ---
 
 ## Propagating Errors with `?`
 
-Instead of handling the error yourself, pass it up to the caller.
+Instead of handling the error inside the function, return it to the caller.
 
-Manual way:
+Manual way — verbose:
 ```rust
+use std::fs::File;
+use std::io::{self, Read};
+
 fn read_username_from_file() -> Result<String, io::Error> {
-    let mut f = match File::open("hello.txt") {
+    let mut username_file = match File::open("hello.txt") {
         Ok(file) => file,
         Err(e) => return Err(e),
     };
-    // ...
+
+    let mut username = String::new();
+
+    match username_file.read_to_string(&mut username) {
+        Ok(_) => Ok(username),
+        Err(e) => Err(e),
+    }
 }
 ```
 
-With `?`:
+With `?` — same logic, much less noise:
 ```rust
 fn read_username_from_file() -> Result<String, io::Error> {
-    let mut f = File::open("hello.txt")?;
+    let mut username_file = File::open("hello.txt")?;
     let mut username = String::new();
-    f.read_to_string(&mut username)?;
+    username_file.read_to_string(&mut username)?;
     Ok(username)
 }
 ```
 
 `?` on a `Result`:
-- `Ok` → unwraps and continues
-- `Err` → returns early with that error
+- `Ok(val)` → unwraps to `val`, execution continues
+- `Err(e)` → converts `e` via `From::from` if needed, then returns early with that error
 
-Can chain:
+Can chain calls:
 ```rust
-File::open("hello.txt")?.read_to_string(&mut username)?;
+fn read_username_from_file() -> Result<String, io::Error> {
+    let mut username = String::new();
+    File::open("hello.txt")?.read_to_string(&mut username)?;
+    Ok(username)
+}
 ```
+
+Or even shorter with the stdlib shortcut:
+```rust
+use std::fs;
+
+fn read_username_from_file() -> Result<String, io::Error> {
+    fs::read_to_string("hello.txt")  // opens, reads, and returns — all in one
+}
+```
+
+**`?` on `Option`:**
+
+`?` works on `Option<T>` too — returns `None` early if the value is `None`:
+
+```rust
+fn last_char_of_first_line(text: &str) -> Option<char> {
+    text.lines().next()?.chars().last()
+    // .next() returns Option<&str>
+    // ? returns None early if there are no lines
+    // .chars().last() returns Option<char>
+}
+```
+
+Can't mix `Result` and `Option` with `?` — must convert explicitly using `.ok()` or `.ok_or()`.
 
 **Constraint:** `?` only works in functions that return `Result`, `Option`, or a type implementing `FromResidual`. Using it in a function that returns `()` is a compile error.
 
 **`?` in `main`:**
 ```rust
+use std::error::Error;
+use std::fs::File;
+
 fn main() -> Result<(), Box<dyn Error>> {
     let f = File::open("hello.txt")?;
     Ok(())
 }
 ```
-`Ok(())` → exit code 0. `Err` → nonzero exit.
+
+`Ok(())` → exit code 0. `Err` → nonzero exit. `Box<dyn Error>` means "any error type" — covered more in ch17 (trait objects).
 
 ---
 
 ## When to `panic!` vs `Result`
 
-**Use `Result` by default** when writing functions that can fail — gives the caller the choice.
+**Default: return `Result`** — gives the caller the choice of how to handle failure.
 
 **Use `panic!` when:**
-- Writing examples, prototypes, or tests — `unwrap`/`expect` are fine as placeholders
-- You know more than the compiler (e.g. you've verified the value is valid, use `expect` with a comment explaining why)
-- A contract has been violated — the caller passed invalid data and continuing would be a bug, not a recoverable situation
+- Writing examples, prototypes, or tests — `unwrap`/`expect` are fine placeholders
+- You know more than the compiler (e.g. hardcoded value that's provably valid):
+  ```rust
+  let home: IpAddr = "127.0.0.1"
+      .parse()
+      .expect("hardcoded IP is always valid");
+  ```
+- A contract has been violated — the caller passed nonsensical values and continuing would be a bug, not a recoverable situation
 
-**Library code:** panic on invalid input that indicates a caller bug. Return `Result` for expected failures (bad input from users, missing files, network errors, etc.).
+**Library code:** panic on invalid input that indicates a caller bug. Return `Result` for expected failures (bad user input, missing files, network errors, etc.).
 
-**Custom validation types:**
+---
 
-Encode validity in the type system so you don't have to re-validate everywhere:
+## Custom Validation Types
+
+Encode validity in the type system so you don't need to re-validate everywhere:
 
 ```rust
 pub struct Guess {
-    value: i32,
+    value: i32,  // private — can only be set through new()
 }
 
 impl Guess {
@@ -154,9 +227,9 @@ impl Guess {
     }
 
     pub fn value(&self) -> i32 {
-        self.value
+        self.value  // read-only getter
     }
 }
 ```
 
-Any function that takes a `Guess` knows the value is already valid — no need to check again.
+Any function that takes a `Guess` knows the value is already 1–100 — no need to check again. The type carries the invariant.

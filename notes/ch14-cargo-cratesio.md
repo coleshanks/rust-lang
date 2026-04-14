@@ -123,6 +123,13 @@ Yanking does not delete code. If you accidentally publish secrets, yank and imme
 
 Update `version` in `Cargo.toml` following semver, then `cargo publish` again.
 
+Semver (`major.minor.patch`):
+- **patch** — bug fixes, no API changes (`0.1.0` → `0.1.1`)
+- **minor** — new features, backwards compatible (`0.1.0` → `0.2.0`)
+- **major** — breaking changes (`0.1.0` → `1.0.0`)
+
+In `Cargo.toml`, `rand = "0.8.5"` means "0.8.5 or any compatible version" — Cargo will accept patch and minor updates but not a new major version.
+
 ---
 
 ## Workspaces
@@ -191,10 +198,12 @@ cargo publish -p add_one
 ## Installing Binaries
 
 ```bash
-cargo install ripgrep
+cargo install ripgrep       # install a binary crate
+cargo search ripgrep        # search crates.io from the terminal
+cargo update                # update dependencies within semver constraints
 ```
 
-Installs the binary to `~/.cargo/bin/`. That path needs to be in your `$PATH`.
+`cargo install` puts the binary in `~/.cargo/bin/` — needs to be in `$PATH`.
 
 Only works for crates with binary targets (`src/main.rs` or equivalent). Not for library-only crates.
 

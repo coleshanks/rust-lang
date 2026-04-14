@@ -92,6 +92,8 @@ let config = Config::build(&args).unwrap_or_else(|err| {
 });
 ```
 
+`process::exit(1)` terminates immediately with a nonzero exit code — no unwinding, no destructors. Cleaner than `panic!` for user-facing errors because it doesn't print the ugly "thread panicked" message.
+
 ### `run` function
 
 Extract all the program logic from `main` into `run`:
@@ -124,6 +126,8 @@ Use `if let` here (not `unwrap_or_else`) because you only care about the error c
 ---
 
 ## The search Function (TDD)
+
+TDD cycle: write a failing test → run it to confirm it fails for the right reason → implement just enough to pass → refactor → repeat.
 
 Write the test first, then implement:
 
