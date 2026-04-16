@@ -19,7 +19,7 @@ Chapter-by-chapter notes from [The Rust Programming Language](https://doc.rust-l
 | 13 | Iterators and Closures | [ch13-iterators-closures.md](ch13-iterators-closures.md) |
 | 14 | More About Cargo | [ch14-cargo-cratesio.md](ch14-cargo-cratesio.md) |
 | 15 | Smart Pointers | [ch15-smart-pointers.md](ch15-smart-pointers.md) |
-| 16 | Fearless Concurrency | — |
+| 16 | Fearless Concurrency | [ch16-concurrency.md](ch16-concurrency.md) |
 | 17 | Async and Await | — |
 | 18 | OOP in Rust | — |
 | 19 | Patterns and Matching | — |
