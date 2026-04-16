@@ -131,6 +131,8 @@ Common use: releasing a lock early so other code can acquire it.
 
 ## `Rc<T>` — Reference Counting
 
+Think of it like a TV in a family room: the first person turns it on, others join and watch, and the last person out turns it off. Nobody turns it off while others are still watching — the count has to hit zero first.
+
 Enables **multiple ownership** in single-threaded code. Tracks how many references exist; cleans up when count hits zero.
 
 ```rust
@@ -213,6 +215,57 @@ let b = Rc::clone(&value);
 ```
 a → b → a  (cycle — both stay at count 2, never dropped)
 ```
+
+### Constructing a cycle (concrete example)
+
+This uses a cons list where each node's tail is a `RefCell<Rc<List>>` — meaning we can change what a node points to after creation.
+
+```rust
+// List where the tail is mutable via RefCell
+enum List {
+    Cons(i32, RefCell<Rc<List>>),
+    Nil,
+}
+
+impl List {
+    fn tail(&self) -> Option<&RefCell<Rc<List>>> {
+        match self {
+            Cons(_, item) => Some(item),
+            Nil => None,
+        }
+    }
+}
+
+fn main() {
+    // a = Cons(5, Nil)
+    let a = Rc::new(Cons(5, RefCell::new(Rc::new(Nil))));
+    // strong_count: a=1
+
+    // b = Cons(10, → a)
+    let b = Rc::new(Cons(10, RefCell::new(Rc::clone(&a))));
+    // strong_count: a=2, b=1
+
+    // Now make a's tail point to b — creates the cycle: a → b → a
+    if let Some(link) = a.tail() {
+        *link.borrow_mut() = Rc::clone(&b);
+    }
+    // strong_count: a=2, b=2
+
+    // When main ends, b drops → b strong_count=1 (not 0, a still points to it)
+    //                  a drops → a strong_count=1 (not 0, b still points to it)
+    // Neither ever reaches 0 — memory leak
+}
+```
+
+**What happens step by step:**
+1. `a` is created pointing to `Nil` — count: `a=1`
+2. `b` is created pointing to `a` — count: `a=2, b=1`
+3. `a`'s tail is mutated to point to `b` — count: `a=2, b=2`
+4. At end of scope both drop by 1, landing at `a=1, b=1` — neither freed
+
+Uncommenting `println!("a next item = {:?}", a.tail())` at the end would overflow the stack trying to print the infinite cycle.
+
+**The fix:** use `Weak<T>` for one direction of the reference so it doesn't contribute to `strong_count`.
 
 ### Solution: `Weak<T>`
 
