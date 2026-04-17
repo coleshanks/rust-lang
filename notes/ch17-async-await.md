@@ -2,6 +2,9 @@
 
 Async is another tool for concurrency — different from threads, complementary to them. The core idea: instead of blocking a thread while waiting on I/O, hand control back to the runtime and let it do something else until the result is ready.
 
+![Concurrent workflow — switching between Task A and Task B](../img/concurrent-workflow.png)
+![Parallel workflow — Task A and Task B progress independently](../img/parallel-workflow.png)
+
 Two kinds of work to keep in mind:
 - **CPU-bound** — limited by processing speed (e.g. video encoding). More CPU = faster.
 - **I/O-bound** — limited by waiting (e.g. network, disk). CPU is mostly idle. This is where async shines.
