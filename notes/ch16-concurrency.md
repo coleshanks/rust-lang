@@ -246,25 +246,34 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 fn main() {
-    let counter = Arc::new(Mutex::new(0));
-    let mut handles = vec![];
+    let counter = Arc::new(Mutex::new(0));  // i32 wrapped in Mutex, wrapped in Arc
+    let mut handles = vec![];               // will collect JoinHandles
 
     for _ in 0..10 {
-        let counter = Arc::clone(&counter); // clone the Arc, not the Mutex
+        let counter = Arc::clone(&counter); // new Arc pointer to same data, ref count +1
+                                            // shadows outer `counter` for this iteration
         let handle = thread::spawn(move || {
-            let mut num = counter.lock().unwrap();
-            *num += 1;
-        }); // lock released when num goes out of scope
+            let mut num = counter.lock().unwrap(); // acquire lock, get MutexGuard<i32>
+            *num += 1;                             // deref the guard to mutate the inner value
+        }); // `num` (MutexGuard) dropped here — lock released automatically
         handles.push(handle);
     }
 
     for handle in handles {
-        handle.join().unwrap();
+        handle.join().unwrap(); // wait for every thread to finish
     }
 
     println!("Result: {}", *counter.lock().unwrap()); // 10
 }
 ```
+
+Line by line:
+- `Arc::new(Mutex::new(0))` — `Arc` handles shared ownership across threads, `Mutex` handles exclusive access. You need both because they solve different problems.
+- `Arc::clone(&counter)` — doesn't clone the data, just creates a new pointer to it and increments the reference count. Each thread gets its own `Arc` clone to `move` into the closure.
+- `counter.lock().unwrap()` — blocks until the lock is available, then returns a `MutexGuard<i32>`. If another thread panicked while holding the lock, this returns `Err` (poisoned mutex) — `.unwrap()` propagates that.
+- `*num += 1` — `MutexGuard` implements `Deref`, so `*num` reaches through to the actual `i32`.
+- Lock is released when `num` goes out of scope at the end of the closure — no manual unlock needed.
+- The second loop joins all handles so main doesn't exit before threads finish.
 
 ### `Arc<T>` vs `Rc<T>`
 
@@ -275,6 +284,10 @@ fn main() {
 | Use case | Single-threaded | Multi-threaded |
 
 `Arc` = **Atomic** reference counted. The atomic ops guarantee the reference count is updated safely across threads.
+
+**What "atomic" means:** A normal `counter += 1` is actually three CPU steps — load, add, store. If two threads interleave mid-operation, you get a corrupted result. Atomics use special CPU instructions (e.g. `LOCK ADD` on x86) that make the whole read-modify-write happen as one indivisible hardware op — it cannot be interrupted or interleaved. Either the full operation happened or it didn't.
+
+For `Arc`, only the reference count needs to be atomic. `Rc` does a plain integer increment (faster, but not thread-safe). The deeper atomic API — `AtomicUsize`, `Ordering`, lock-free data structures — lives in `std::sync::atomic` and is lower-level systems territory.
 
 ### Deadlocks
 

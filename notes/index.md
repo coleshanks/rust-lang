@@ -20,8 +20,18 @@ Chapter-by-chapter notes from [The Rust Programming Language](https://doc.rust-l
 | 14 | More About Cargo | [ch14-cargo-cratesio.md](ch14-cargo-cratesio.md) |
 | 15 | Smart Pointers | [ch15-smart-pointers.md](ch15-smart-pointers.md) |
 | 16 | Fearless Concurrency | [ch16-concurrency.md](ch16-concurrency.md) |
-| 17 | Async and Await | — |
+| 17 | Async and Await | [ch17-async-await.md](ch17-async-await.md) |
 | 18 | OOP in Rust | — |
 | 19 | Patterns and Matching | — |
 | 20 | Advanced Features | — |
 | 21 | Multithreaded Web Server | — |
+
+## Concepts
+
+General systems and CS concepts, not tied to a specific chapter.
+
+| Topic | Notes |
+|---|---|
+| Latency, Bandwidth, Throughput, etc. | [concepts/systems-terms.md](concepts/systems-terms.md) |
+| Fiber optic, modulation, AC/DC, undersea cables | [concepts/signals-power-networking.md](concepts/signals-power-networking.md) |
+| Edison vs Tesla — who changed the world more? | [concepts/edison-tesla.md](concepts/edison-tesla.md) |
