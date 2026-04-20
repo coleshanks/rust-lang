@@ -70,20 +70,62 @@ fn main() {
 
 ### Racing two futures with `select`
 
-```rust
-let title_fut_1 = page_title(&args[1]);
-let title_fut_2 = page_title(&args[2]);
+Full working example — async web scraper that races two URLs and reports which loads first:
 
-let (url, maybe_title) =
-    match trpl::select(title_fut_1, title_fut_2).await {
-        Either::Left(left) => left,
-        Either::Right(right) => right,
-    };
+```rust
+use trpl::{Either, Html};
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    trpl::block_on(async {
+        let title_fut_1 = page_title(&args[1]);
+        let title_fut_2 = page_title(&args[2]);
+
+        let (url, maybe_title) = match trpl::select(title_fut_1, title_fut_2).await {
+            Either::Left(left) => left,
+            Either::Right(right) => right,
+        };
+
+        println!("{url} returned first");
+
+        match maybe_title {
+            Some(title) => println!("Its page title was: '{title}'"),
+            None => println!("It had no title"),
+        }
+    })
+}
+
+async fn page_title(url: &str) -> (&str, Option<String>) {
+    let response_text = trpl::get(url).await.text().await;
+    let title = Html::parse(&response_text)
+        .select_first("title")
+        .map(|title| title.inner_html());
+
+    (url, title)
+}
 ```
 
-- Both futures are created but **not started** — they're lazy until polled
-- `trpl::select` races them, returns whichever finishes first as `Either::Left` or `Either::Right`
-- **Not fair** — polls its first argument first, so the first future has a slight priority advantage
+Breaking it down:
+
+**`page_title` is an async fn** — returns a future. Its actual return type is `impl Future<Output = (&str, Option<String>)>`. It returns a tuple of the URL (so the caller knows which site it was) and the page title if one exists.
+
+**Inside `page_title`:**
+- `trpl::get(url).await` — fires the HTTP request and pauses here until the response headers arrive. The `.await` is what yields control back to the runtime while waiting on the network.
+- `.text().await` — reads the response body. Also async — the body may still be streaming in.
+- `Html::parse(...)` — parses the HTML string synchronously (no await needed)
+- `.select_first("title")` — finds the first `<title>` element, returns `Option`
+- `.map(|title| title.inner_html())` — if it exists, extract the text inside the tag
+
+**Inside `main`:**
+- `let title_fut_1 = page_title(&args[1])` — this does **not** start the request. It creates the future (lazy). Same for `title_fut_2`. Both are sitting there doing nothing yet.
+- `trpl::select(title_fut_1, title_fut_2).await` — now both futures start being polled. Whichever network response arrives first wins. Returns `Either::Left(value)` if the first future won, `Either::Right(value)` if the second did.
+- The `match` just unpacks either variant — both arms produce the same tuple type `(&str, Option<String>)`, so `(url, maybe_title)` gets bound regardless of which won.
+- The loser future is dropped — its request may still be in-flight on the network, but we stop caring about it.
+
+**`Either` is not success/failure** — it just means "which one." `Left` = first arg won, `Right` = second arg won. No relationship to `Ok`/`Err`.
+
+**Not fair** — `select` polls its first argument first on each round. If both are ready simultaneously, `title_fut_1` wins. Slight but real bias.
 
 ---
 
@@ -94,24 +136,59 @@ let (url, maybe_title) =
 `trpl::spawn_task` is the async equivalent of `thread::spawn`:
 
 ```rust
-trpl::block_on(async {
-    let handle = trpl::spawn_task(async {
-        for i in 1..10 {
-            println!("hi {i} from spawned task");
+use std::time::Duration;
+
+fn main() {
+    trpl::block_on(async {
+        trpl::spawn_task(async {
+            for i in 1..10 {
+                println!("hi number {i} from the first task!");
+                trpl::sleep(Duration::from_millis(500)).await;
+            }
+        });
+
+        for i in 1..5 {
+            println!("hi number {i} from the second task!");
             trpl::sleep(Duration::from_millis(500)).await;
         }
-    });
-
-    for i in 1..5 {
-        println!("hi {i} from main task");
-        trpl::sleep(Duration::from_millis(500)).await;
-    }
-
-    handle.await.unwrap(); // wait for spawned task to finish
-});
+    })
+}
 ```
 
-Same rule as threads: the spawned task is killed when the outer block ends unless you `.await` the handle.
+Breaking it down:
+
+- `trpl::block_on` sets up the async runtime and drives the outer future to completion — same as before, necessary because `main` can't be async
+- `trpl::spawn_task(async { ... })` launches the inner async block as an independent task — it starts running concurrently with the rest of `block_on`'s body
+- `trpl::sleep(...).await` is the key: each time either task hits a sleep, it yields control back to the runtime, which then runs the other task. This is how they interleave — they take turns at each await point
+- The spawned task counts to 10, the main task counts to 5. When the main task's loop finishes, `block_on` exits and the spawned task is **killed** — it won't finish printing all 10 numbers
+
+To let the spawned task finish, capture the handle and await it:
+
+```rust
+use std::time::Duration;
+
+fn main() {
+    trpl::block_on(async {
+        let handle = trpl::spawn_task(async {
+            for i in 1..10 {
+                println!("hi number {i} from the first task!");
+                trpl::sleep(Duration::from_millis(500)).await;
+            }
+        });
+
+        for i in 1..5 {
+            println!("hi number {i} from the second task!");
+            trpl::sleep(Duration::from_millis(500)).await;
+        }
+
+        handle.await.unwrap();
+    });
+}
+```
+
+- `spawn_task` returns a `JoinHandle` — same concept as `thread::spawn`
+- `handle.await.unwrap()` — the `.await` is new here vs threads (where you'd call `.join()`). It pauses the outer async block until the spawned task completes. Without this line, `block_on` exits after the main loop finishes and the spawned task is killed mid-run.
+- Both tasks still interleave while the main loop is running — `handle.await` only kicks in after the main loop is done, at which point it waits for the spawned task to finish its remaining iterations.
 
 ### `trpl::join` — run futures concurrently
 
@@ -139,6 +216,32 @@ trpl::join(fut1, fut2).await;
 
 ### Message passing with async channels
 
+Async channels work like `mpsc` from ch16, but `recv` is async. First, the naive version that seems like it should work but doesn't behave as expected:
+
+```rust
+let (tx, mut rx) = trpl::channel();
+
+let vals = vec![
+    String::from("hi"),
+    String::from("from"),
+    String::from("the"),
+    String::from("future"),
+];
+
+for val in vals {
+    tx.send(val).unwrap();
+    trpl::sleep(Duration::from_millis(500)).await;
+}
+
+while let Some(value) = rx.recv().await {
+    println!("received '{value}'");
+}
+```
+
+This is all in one async block, so it runs **sequentially** — the entire send loop finishes first (all 4 messages sent, with 500ms sleeps between them), then the while loop runs and prints all 4 at once. Not the trickling effect you'd expect.
+
+The fix is splitting send and recv into separate async blocks so the runtime can interleave them:
+
 ```rust
 let (tx, mut rx) = trpl::channel();
 
@@ -160,13 +263,12 @@ let rx_fut = async {
 trpl::join(tx_fut, rx_fut).await;
 ```
 
-Key points:
-- `rx.recv()` returns a future — must be `.await`ed
-- `send()` doesn't need `.await` — it's not async
-- `async move` on the tx block ensures `tx` is dropped when it finishes, closing the channel
-- Without that, `rx_fut` would wait forever for more messages
-
-**Why separate blocks matter:** within a single async block, code runs linearly between await points. If you put both send and recv logic in one block, all the sends happen first, then all the recvs. Splitting them into separate futures lets the runtime interleave them.
+- `let (tx, mut rx) = trpl::channel()` — `rx` must be `mut` because `recv()` mutates internal state
+- `send()` is synchronous — no `.await` needed
+- `rx.recv().await` — async, pauses until a message arrives or channel closes
+- `while let Some(value)` — `recv()` returns `None` when the channel is closed (tx dropped), which ends the loop
+- `async move` on `tx_fut` — moves `tx` into the block so it's dropped when the block finishes, closing the channel. Without this, `rx` would wait forever
+- `trpl::join` runs both futures concurrently — tx sends one, yields; rx receives it, yields; tx sends another, and so on
 
 ### Multiple producers with `join!` macro
 
@@ -311,27 +413,41 @@ Don't call `poll` again after `Ready` — many futures will panic.
 
 ### `Pin` and `Unpin`
 
-Async state machines can be **self-referential** — they contain internal pointers to their own data (tracking which await point they're at). If such a future is moved in memory, those pointers become invalid.
+When Rust compiles an `async` block into a state machine, that state machine can end up **self-referential** — it holds a pointer to data that lives inside itself (e.g. a reference to a local variable across an await point). This is normally fine, but it creates a problem: if you move the state machine to a different memory address, the internal pointer still points to the old address. Dangling pointer, undefined behavior.
 
-`Pin<P>` wraps a pointer and guarantees the pointed-to data won't move:
+`Pin<P>` solves this by wrapping a pointer type and making a guarantee: **the data it points to will not move in memory**.
 
 ```rust
-Pin<Box<SomeType>>  // the Box can move, but SomeType stays put
+Pin<Box<SomeType>>  // Box can move (it's just a pointer), but SomeType is stuck in place
 ```
 
-`Unpin` is a marker trait for types that are safe to move even when "pinned" — most normal types implement it automatically. The types that don't (`!Unpin`) are the self-referential async state machines.
+So the box itself can be copied around, but the heap allocation it points to stays at the same address — which keeps any internal self-references valid.
 
-In day-to-day code you mostly don't touch `Pin` directly — `await` handles it. It becomes relevant when:
-- Collecting futures into a `Vec` for `join_all`
-- Building low-level async primitives
+`Unpin` is a marker trait meaning "this type is safe to move even when wrapped in Pin." Most normal Rust types implement `Unpin` automatically because they have no internal pointers. The types that don't (`!Unpin`) are the self-referential async state machines the compiler generates.
+
+![Figure 17-6: Pinning a Box that points to a self-referential future](../img/Figure_17-6.png)
+
+The diagram shows `Pin` wrapping `b1` (a Box), which points to `fut` pinned in memory. The self-referential arrow inside `fut` points from one field back to another field within the same struct — if the whole thing moved, that internal pointer would be wrong. `Pin` prevents the move.
+
+An important nuance: `Pin` locks the **memory address**, not the **value at that address**. For types that implement `Unpin` (like `String`), you can still replace the contents even through a `Pin` — the pointer stays the same but the data can change:
+
+![Figure 17-9: Replacing the String with an entirely different String in memory](../img/Figure_17-9.png)
+
+`Pin` still points to the same location, but `s1` ("hello") was replaced with `s2` ("goodbye"). This is fine for `Unpin` types because they have no internal self-references to break. For `!Unpin` types (async state machines), `Pin` prevents this kind of replacement too — the whole point is those types can't safely be moved or swapped out.
+
+In practice you rarely touch `Pin` directly — `.await` handles all of this for you. It surfaces when you need to put futures into a collection:
 
 ```rust
-// When you need to store futures in a collection:
+use std::pin::pin;
+
+// pin!() macro pins a future to the stack — it can't be moved after this
 let futures: Vec<Pin<&mut dyn Future<Output = ()>>> =
     vec![pin!(fut1), pin!(fut2), pin!(fut3)];
 
 trpl::join_all(futures).await;
 ```
+
+Without pinning, the compiler won't let you store `!Unpin` futures in a `Vec` because moving them into the vec could invalidate their internal pointers.
 
 ### `Stream` trait
 
@@ -366,6 +482,8 @@ Three levels of concurrency, coarsest to finest:
 - Tasks: runtime switches between them at await points, share memory within a runtime, lightweight
 - Tasks can interleave futures *within* a single task — concurrency at multiple levels
 
+**Embedded relevance:** threads are an OS concept — no OS means no threads. On bare metal (e.g. RP2040), `std::thread` is not available. Async works because the runtime is just a library, not an OS feature. Embassy is an async executor designed specifically for no-OS embedded targets — this is why it's the right choice for the Pico. You get concurrency without needing an OS at all.
+
 ### Using both together
 
 Threads and async aren't mutually exclusive:
@@ -373,21 +491,27 @@ Threads and async aren't mutually exclusive:
 ```rust
 let (tx, mut rx) = trpl::channel();
 
-// CPU-bound work on a thread
-thread::spawn(move || {
-    for i in 1..11 {
-        tx.send(i).unwrap();
-        thread::sleep(Duration::from_secs(1));
-    }
-});
+use std::{thread, time::Duration};
 
-// Async receiver
-trpl::block_on(async {
-    while let Some(message) = rx.recv().await {
-        println!("{message}");
-    }
-});
+fn main() {
+    let (tx, mut rx) = trpl::channel();
+
+    thread::spawn(move || {
+        for i in 1..11 {
+            tx.send(i).unwrap();
+            thread::sleep(Duration::from_secs(1)); // blocking sleep — fine on its own thread
+        }
+    });
+
+    trpl::block_on(async {
+        while let Some(message) = rx.recv().await {
+            println!("{message}");
+        }
+    });
+}
 ```
+
+The thread does blocking CPU/IO work and sends results over a channel. The async block receives them without blocking the runtime — `rx.recv().await` yields control between messages. You don't have to pick one model; threads and async compose naturally via channels.
 
 Real-world example: video encoding on a dedicated thread (CPU-bound), notifying the UI via async channel (I/O-bound).
 
