@@ -303,6 +303,7 @@ impl State for Draft {}
 
 Full implementation:
 
+```rust
 impl Post {
     pub fn new() -> Post {
         Post {
