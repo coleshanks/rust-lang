@@ -21,7 +21,7 @@ Chapter-by-chapter notes from [The Rust Programming Language](https://doc.rust-l
 | 15 | Smart Pointers | [ch15-smart-pointers.md](ch15-smart-pointers.md) |
 | 16 | Fearless Concurrency | [ch16-concurrency.md](ch16-concurrency.md) |
 | 17 | Async and Await | [ch17-async-await.md](ch17-async-await.md) |
-| 18 | OOP in Rust | — |
+| 18 | OOP in Rust | [ch18-oop.md](ch18-oop.md) |
 | 19 | Patterns and Matching | — |
 | 20 | Advanced Features | — |
 | 21 | Multithreaded Web Server | — |
