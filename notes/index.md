@@ -22,9 +22,10 @@ Chapter-by-chapter notes from [The Rust Programming Language](https://doc.rust-l
 | 16 | Fearless Concurrency | [ch16-concurrency.md](ch16-concurrency.md) |
 | 17 | Async and Await | [ch17-async-await.md](ch17-async-await.md) |
 | 18 | OOP in Rust | [ch18-oop.md](ch18-oop.md) |
-| 19 | Patterns and Matching | — |
-| 20 | Advanced Features | — |
-| 21 | Multithreaded Web Server | — |
+| 19 | Patterns and Matching | [ch19-patterns.md](ch19-patterns.md) |
+| 20 | Advanced Features | [ch20-advanced-features.md](ch20-advanced-features.md) |
+| 21 | Multithreaded Web Server | [ch21-web-server.md](ch21-web-server.md) |
+| Appendix | Keywords, Operators, Derivable Traits, Dev Tools, Editions, Nightly | [appendix.md](appendix.md) |
 
 ## Concepts
 
@@ -34,4 +35,4 @@ General systems and CS concepts, not tied to a specific chapter.
 |---|---|
 | Latency, Bandwidth, Throughput, etc. | [concepts/systems-terms.md](concepts/systems-terms.md) |
 | Fiber optic, modulation, AC/DC, undersea cables | [concepts/signals-power-networking.md](concepts/signals-power-networking.md) |
-| Edison vs Tesla — who changed the world more? | [concepts/edison-tesla.md](concepts/edison-tesla.md) |
+
